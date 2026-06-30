@@ -2,11 +2,11 @@ body{
     font-family: Arial, Helvetica, sans-serif;
     margin:0;
     padding:30px;
-    background:#1e1e1e;
-    color:#eee;
+    background:#17433F;
+    color:#FFF4E1;
 }
 
-h1,h3{ color:#fff; }
+h1,h3{ color:#FFF4E1; }
 
 .container{ display:flex; gap:10px; align-items:center; margin-bottom:10px; }
 
@@ -22,12 +22,11 @@ table{
 }
 
 th, td{
-    border:1px solid #444;
     padding:6px 10px;
     text-align:left;
 }
 
-th{ background:#333; }
+th{ background:#558467; }
 
 .extras-table td{ vertical-align:top; border:none; padding:15px; }
 
@@ -70,7 +69,7 @@ th{ background:#333; }
 }
 
 .summary-card{
-    background:#2a2a2a;
+    background:#2B5748;
     border-radius:8px;
     padding:25px;
     box-shadow:0 2px 10px rgba(0,0,0,0.3);
