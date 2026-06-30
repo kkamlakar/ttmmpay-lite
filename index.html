@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<title>TTMMPay Lite</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<link rel="stylesheet" href="style.css">
+
+</head>
+
+<body>
+
+<div class="page">
+
+<!-- ============ ENTRY SCREEN ============ -->
+<div id="entryScreen">
+
+<h1>TTMMPay <small style="font-size:14px;color:#aaa;">(Lite)</small></h1>
+
+<div class="container">
+    <input type="text" id="restaurantName" placeholder="Restaurant Name">
+    <input type="date" id="billDate">
+    <input type="time" id="billTime">
+</div>
+
+<table class="extras-table">
+<tr>
+<td>
+<h3>Step 1: Add Persons</h3>
+<input type="text" id="personName" placeholder="Person Name">
+<button onclick="addPerson()">Add Person</button>
+<p><b>Persons Added:</b> <span id="personCount">0</span></p>
+<table id="personList">
+<tr><th>Name</th><th>Edit</th><th>Delete</th></tr>
+</table>
+</td>
+<td>
+<h3>Step 2: Add Items</h3>
+<input type="text" id="itemName" placeholder="Item Name">
+<input type="number" id="itemPrice" placeholder="Price">
+<button onclick="addItem()">Add Item</button>
+<p><b>Items Added:</b> <span id="itemCount">0</span></p>
+<table id="itemList">
+<tr><th>Item</th><th>Price</th><th>Edit</th><th>Delete</th></tr>
+</table>
+</td>
+</tr>
+</table>
+
+<h3>Extras</h3>
+<table class="extras-table">
+<tr>
+    <td>
+        <label><b>Tax:</b></label><br>
+        <input type="number" id="tax" value="0" oninput="renderSummary()">
+        <div class="checkbox-container" id="taxPeopleContainer"></div>
+    </td>
+    <td>
+        <label><b>Tip:</b></label><br>
+        <input type="number" id="tip" value="0" oninput="renderSummary()">
+        <div class="checkbox-container" id="tipPeopleContainer"></div>
+    </td>
+</tr>
+</table>
+
+<h3>Step 3: Assign Consumption & Summary</h3>
+<div id="itemConsumption"></div>
+
+<hr>
+
+<h3>Bill Summary (live)</h3>
+<table id="summaryTable">
+<tr><th>Item</th><th>Consumed By</th><th>Total Price</th><th>Price per Person</th></tr>
+</table>
+
+<h3>Tax and Tip</h3>
+<table id="taxntipTable">
+<tr><th>Extras</th><th>Paid By</th><th>Total Price</th><th>Price per Person</th></tr>
+</table>
+
+<h3>Final Amount Per Person</h3>
+<table id="finalTable">
+<tr><th>Person</th><th>Total Amount</th></tr>
+</table>
+
+<br>
+<button id="saveBtn" onclick="showSummaryScreen()">View Final Summary</button>
+<button id="resetBtn" onclick="resetAll()">Reset All</button>
+<div id="saveError" style="color:#ff8080;margin-top:8px;"></div>
+
+</div>
+
+
+<!-- ============ FINAL SUMMARY SCREEN ============ -->
+<div id="summaryScreen">
+
+<button id="backBtn" onclick="backToEntry()">← Back to Edit</button>
+<button id="newBillBtn" onclick="resetAll()">+ Create New Bill</button>
+<button id="downloadPdfBtn" onclick="downloadPDF()">Download PDF</button>
+<button id="downloadExcelBtn" onclick="downloadExcel()">Download Excel</button>
+
+<div class="summary-card">
+
+<h1>Bill Summary</h1>
+<p id="summaryMeta" style="color:#aaa;"></p>
+
+<h3>Total Payable</h3>
+<table id="finalSummaryTable">
+<tr><th>Person</th><th>Total</th><th>Percentage</th></tr>
+</table>
+
+<div class="chart-wrap">
+    <canvas id="billChart"></canvas>
+</div>
+
+<h3>Item Details</h3>
+<table id="itemDetailsTable">
+<tr><th>Item</th><th>Price</th><th>Split Between</th></tr>
+</table>
+
+<h3>Person Details</h3>
+<table id="personDetailsTable">
+<tr><th>Person</th><th>Items Consumed</th><th>Total Amount</th></tr>
+</table>
+</div>
+</div>
+
+</div>
+
+
+<script>
+
+let persons = []
+let items = []
+
+
+// ---------- Person handling ----------
+function addPerson(){
+    let name = document.getElementById('personName').value.trim()
+    name = capitalizeWords(name)
+    if(!name) return alert("Enter person name")
+    if(persons.includes(name)) return alert("Person already added")
+    persons.push(name)
+    document.getElementById('personName').value=""
+    document.getElementById('personName').focus()
+    updatePersonList()
+    updateItemConsumption()
+    updateExtrasCheckboxes()
+}
+
+function updatePersonList(){
+    const table = document.getElementById("personList")
+    table.innerHTML = `<tr><th>Name</th><th>Edit</th><th>Delete</th></tr>`
+    persons.forEach(p => {
+        const row = table.insertRow()
+        row.insertCell(0).innerText = p
+        row.insertCell(1).innerHTML = `<button onclick="editPerson('${p}')">Edit</button>`
+        row.insertCell(2).innerHTML = `<button onclick="deletePerson('${p}')">Delete</button>`
+    })
+    document.getElementById("personCount").innerText = persons.length
+}
+
+function editPerson(oldName){
+    let newName = prompt("Edit person name:", oldName)
+    if(!newName) return
+    newName = capitalizeWords(newName.trim())
+    const index = persons.indexOf(oldName)
+    persons[index] = newName
+    items.forEach(item=>{
+        item.consumed.forEach(p => { if (p.name === oldName) p.name = newName })
+    })
+    updatePersonList()
+    updateItemConsumption()
+    updateExtrasCheckboxes()
+}
+
+function deletePerson(name){
+    persons = persons.filter(p => p !== name)
+    items.forEach(item=>{ item.consumed = item.consumed.filter(p=>p.name!==name) })
+    updatePersonList()
+    updateItemConsumption()
+    updateExtrasCheckboxes()
+}
+
+
+// ---------- Item handling ----------
+function addItem(){
+    let name = document.getElementById("itemName").value.trim()
+    name = capitalizeWords(name)
+    const price = parseFloat(document.getElementById("itemPrice").value)
+    if(!name || isNaN(price)) return alert("Enter item name and price")
+
+    items.push({
+        name, price, equalSplit: true,
+        consumed: persons.map(p => ({ name: p, selected: false, percentage: 0 }))
+    })
+
+    document.getElementById("itemName").value=""
+    document.getElementById("itemPrice").value=""
+    document.getElementById("itemName").focus()
+
+    updateItemList()
+    updateItemConsumption()
+}
+
+function updateItemList(){
+    const table = document.getElementById("itemList")
+    table.innerHTML = `<tr><th>Item</th><th>Price</th><th>Edit</th><th>Delete</th></tr>`
+    items.forEach(item => {
+        const row = table.insertRow()
+        row.insertCell(0).innerText = item.name
+        row.insertCell(1).innerText = "₹" + item.price.toFixed(2)
+        row.insertCell(2).innerHTML = `<button onclick="editItem(${items.indexOf(item)})">Edit</button>`
+        row.insertCell(3).innerHTML = `<button onclick="deleteItem(${items.indexOf(item)})">Delete</button>`
+    })
+    document.getElementById("itemCount").innerText = items.length
+}
+
+function editItem(index){
+    let item = items[index]
+    let newName = prompt("Edit item name:", item.name)
+    if(!newName) return
+    newName = capitalizeWords(newName.trim())
+    let newPrice = prompt("Edit price:", item.price)
+    if(!newPrice || isNaN(newPrice)) return alert("Invalid price")
+    items[index].name = newName
+    items[index].price = parseFloat(newPrice)
+    updateItemList()
+    updateItemConsumption()
+}
+
+function deleteItem(index){
+    items.splice(index,1)
+    updateItemList()
+    updateItemConsumption()
+}
+
+
+// ---------- Consumption assignment ----------
+function updateItemConsumption(){
+
+    const div = document.getElementById("itemConsumption")
+    div.innerHTML=""
+
+    items.forEach((item,i)=>{
+
+        const itemDiv = document.createElement("div")
+        itemDiv.style.marginBottom="15px"
+
+        const title = document.createElement("strong")
+        title.innerText = `${item.name} (₹${item.price.toFixed(2)})`
+        itemDiv.appendChild(title)
+
+        const selectAllBtn = document.createElement("button")
+        selectAllBtn.innerText = "Select All"
+        selectAllBtn.style.marginLeft = "10px"
+        selectAllBtn.onclick = function () {
+            item.equalSplit = true
+            const percent = 100 / persons.length
+            item.consumed.forEach(p => { p.selected = true; p.percentage = percent })
+            updateItemConsumption()
+        }
+
+        const deselectAllBtn = document.createElement("button")
+        deselectAllBtn.innerText = "Deselect All"
+        deselectAllBtn.style.marginLeft = "5px"
+        deselectAllBtn.onclick = function () {
+            item.equalSplit = true
+            item.consumed.forEach(p => { p.selected = false; p.percentage = 0 })
+            updateItemConsumption()
+        }
+
+        itemDiv.appendChild(selectAllBtn)
+        itemDiv.appendChild(deselectAllBtn)
+
+        const container = document.createElement("div")
+        container.className="checkbox-container"
+
+        if(item.equalSplit){
+            const selected = item.consumed.filter(p => p.selected)
+            if(selected.length){
+                const percent = 100 / selected.length
+                selected.forEach(p=>{ p.percentage = percent })
+                item.consumed.filter(p => !p.selected).forEach(p => p.percentage = 0)
+            }
+        }
+
+        item.consumed.forEach((person)=>{
+
+            const row=document.createElement("div")
+            row.className = "checkbox-row"
+
+            const cb=document.createElement("input")
+            cb.type="checkbox"
+            cb.checked=person.selected
+            cb.onchange = () => { person.selected = cb.checked; updateItemConsumption() }
+
+            const nameText=document.createTextNode(person.name)
+
+            const percentInput = document.createElement("input")
+            percentInput.type="number"
+            percentInput.value = person.percentage ? person.percentage.toFixed(2) : ""
+            percentInput.style.width="60px"
+            percentInput.style.marginLeft="10px"
+            percentInput.disabled = !person.selected
+
+            percentInput.onchange=function(){
+                item.equalSplit = false
+                person.percentage = parseFloat(this.value) || 0
+                renderSummary()
+            }
+
+            row.appendChild(cb)
+            row.appendChild(nameText)
+            row.appendChild(percentInput)
+            row.appendChild(document.createTextNode(" %"))
+
+            container.appendChild(row)
+        })
+
+        itemDiv.appendChild(container)
+
+        if(!item.equalSplit){
+            const totalDiv = document.createElement("div")
+            totalDiv.style.color = "red"
+            const total = getTotalPercentage(item)
+            totalDiv.innerText = "Total %: " + total
+            if(total === 100){ totalDiv.style.color = "lightgreen" }
+            itemDiv.appendChild(totalDiv)
+        }
+
+        div.appendChild(itemDiv)
+    })
+
+    renderSummary()
+}
+
+
+// ---------- Live summary (entry screen) ----------
+function computeTotals(){
+
+    const totals = {}
+    persons.forEach(p => totals[p] = 0)
+
+    items.forEach(item => {
+        let selected = item.consumed.filter(p => p.selected)
+
+        if(item.equalSplit){
+            let share = selected.length ? item.price / selected.length : 0
+            selected.forEach(p => { totals[p.name] += share })
+        }else{
+            selected.forEach(p=>{ totals[p.name] += item.price * (p.percentage / 100) })
+        }
+    })
+
+    let tax = parseFloat(document.getElementById('tax').value) || 0
+    let taxPeople = Array.from(document.querySelectorAll('.taxPerson:checked')).map(cb => cb.value)
+    if (tax > 0 && taxPeople.length > 0) {
+        let taxPerPerson = tax / taxPeople.length
+        taxPeople.forEach(p => { if (totals[p] !== undefined) totals[p] += taxPerPerson })
+    }
+
+    let tip = parseFloat(document.getElementById('tip').value) || 0
+    let tipPeople = Array.from(document.querySelectorAll('.tipPerson:checked')).map(cb => cb.value)
+    if (tip > 0 && tipPeople.length > 0) {
+        let tipPerPerson = tip / tipPeople.length
+        tipPeople.forEach(p => { if (totals[p] !== undefined) totals[p] += tipPerPerson })
+    }
+
+    return totals
+}
+
+function renderSummary(){
+
+    const summaryTable = document.getElementById("summaryTable")
+    summaryTable.innerHTML = `<tr><th>Item</th><th>Consumed By</th><th>Total Price</th><th>Price per Person</th></tr>`
+
+    items.forEach(item => {
+        const row = summaryTable.insertRow()
+        row.insertCell(0).innerText = item.name
+        row.insertCell(1).innerText = item.consumed.filter(p => p.selected).map(p => p.name).join(", ") || "-"
+        row.insertCell(2).innerText = item.price.toFixed(2)
+
+        let selected = item.consumed.filter(p => p.selected)
+
+        if(item.equalSplit){
+            let share = selected.length ? item.price / selected.length : 0
+            row.insertCell(3).innerText = share.toFixed(2)
+        }else{
+            row.insertCell(3).innerText = selected.map(p =>
+                `${p.name}: ₹${(item.price * p.percentage / 100).toFixed(2)}`
+            ).join(" | ")
+        }
+    })
+
+    // ===== Tax & Tip table =====
+    const taxntipTable = document.getElementById("taxntipTable")
+    taxntipTable.innerHTML = `<tr><th>Extras</th><th>Consumed By</th><th>Total Price</th><th>Price per Person</th></tr>`
+
+    const tax = parseFloat(document.getElementById('tax').value) || 0
+    const taxPeople = Array.from(document.querySelectorAll('.taxPerson:checked')).map(cb => cb.value)
+
+    if(tax > 0){
+        const row = taxntipTable.insertRow()
+        row.insertCell(0).innerText = "Tax"
+        row.insertCell(1).innerText = taxPeople.join(", ") || "-"
+        row.insertCell(2).innerText = tax.toFixed(2)
+        const share = taxPeople.length ? tax / taxPeople.length : 0
+        row.insertCell(3).innerText = share.toFixed(2)
+    }
+
+    const tip = parseFloat(document.getElementById('tip').value) || 0
+    const tipPeople = Array.from(document.querySelectorAll('.tipPerson:checked')).map(cb => cb.value)
+
+    if(tip > 0){
+        const row = taxntipTable.insertRow()
+        row.insertCell(0).innerText = "Tip"
+        row.insertCell(1).innerText = tipPeople.join(", ") || "-"
+        row.insertCell(2).innerText = tip.toFixed(2)
+        const share = tipPeople.length ? tip / tipPeople.length : 0
+        row.insertCell(3).innerText = share.toFixed(2)
+    }
+
+    if(tax <= 0 && tip <= 0){
+        const row = taxntipTable.insertRow()
+        const cell = row.insertCell(0)
+        cell.colSpan = 4
+        cell.innerText = "No tax or tip added"
+        cell.style.color = "#888"
+    }
+
+    const totals = computeTotals()
+
+    const finalTable = document.getElementById("finalTable")
+    finalTable.innerHTML = `<tr><th>Person</th><th>Total Amount</th></tr>`
+    for (const p in totals){
+        const row = finalTable.insertRow()
+        row.insertCell(0).innerText = p
+        row.insertCell(1).innerText = totals[p].toFixed(2)
+    }
+
+    let invalid = false
+    items.forEach(item => {
+        const total = getTotalPercentage(item)
+        if (!item.equalSplit && item.consumed.some(p => p.selected) && total !== 100) invalid = true
+    })
+
+    const saveBtn = document.getElementById("saveBtn")
+    const saveError = document.getElementById("saveError")
+
+    if (invalid) {
+        saveBtn.disabled = true
+        saveBtn.style.opacity = "0.5"
+        saveError.innerText = "⚠ One or more items do not total 100%."
+    } else {
+        saveBtn.disabled = false
+        saveBtn.style.opacity = "1"
+        saveError.innerText = ""
+    }
+}
+
+
+// ---------- Final summary screen (replaces Django page, fully local) ----------
+let billChartInstance = null
+
+function showSummaryScreen(){
+
+    if(persons.length === 0) return alert("Add at least one person")
+    if(items.length === 0) return alert("Add at least one item")
+
+    let hasConsumption = items.some(item => item.consumed.some(p => p.selected))
+    if(!hasConsumption) return alert("Assign at least one item to someone")
+
+    const totals = computeTotals()
+    const grandTotal = Object.values(totals).reduce((a,b)=>a+b, 0)
+
+    // Meta line
+    const restaurantName = document.getElementById("restaurantName").value || "Untitled Bill"
+    const billDate = document.getElementById("billDate").value
+    const billTime = document.getElementById("billTime").value
+    document.getElementById("summaryMeta").innerText =
+        [restaurantName, billDate, billTime].filter(Boolean).join(" • ")
+
+    // Totals table
+    const finalSummaryTable = document.getElementById("finalSummaryTable")
+    finalSummaryTable.innerHTML = `<tr><th>Person</th><th>Total</th><th>Percentage</th></tr>`
+    for (const p in totals){
+        const pct = grandTotal ? ((totals[p] / grandTotal) * 100).toFixed(1) : "0.0"
+        const row = finalSummaryTable.insertRow()
+        row.insertCell(0).innerText = p
+        row.insertCell(1).innerText = "₹" + totals[p].toFixed(2)
+        row.insertCell(2).innerText = pct + "%"
+    }
+
+    // Item details table
+    const itemDetailsTable = document.getElementById("itemDetailsTable")
+    itemDetailsTable.innerHTML = `<tr><th>Item</th><th>Price</th><th>Split Between</th></tr>`
+    items.forEach(item => {
+        const selected = item.consumed.filter(p => p.selected)
+        const row = itemDetailsTable.insertRow()
+        row.insertCell(0).innerText = item.name
+        row.insertCell(1).innerText = "₹" + item.price.toFixed(2)
+        row.insertCell(2).innerText = selected.length
+            ? selected.map(p => item.equalSplit ? p.name : `${p.name} (${p.percentage.toFixed(0)}%)`).join(", ")
+            : "-"
+    })
+    
+    const tax = parseFloat(document.getElementById('tax').value) || 0
+    const taxPeople = Array.from(document.querySelectorAll('.taxPerson:checked')).map(cb => cb.value)
+    if(tax > 0){
+        const row = itemDetailsTable.insertRow()
+        row.className = "extra-row"
+        row.insertCell(0).innerText = "Tax"
+        row.insertCell(1).innerText = "₹" + tax.toFixed(2)
+        row.insertCell(2).innerText = taxPeople.join(", ") || "-"
+    }
+
+    // Tip row
+    const tip = parseFloat(document.getElementById('tip').value) || 0
+    const tipPeople = Array.from(document.querySelectorAll('.tipPerson:checked')).map(cb => cb.value)
+    if(tip > 0){
+        const row = itemDetailsTable.insertRow()
+        row.className = "extra-row"
+        row.insertCell(0).innerText = "Tip"
+        row.insertCell(1).innerText = "₹" + tip.toFixed(2)
+        row.insertCell(2).innerText = tipPeople.join(", ") || "-"
+    }    
+
+    // Person details table
+    const personDetailsTable = document.getElementById("personDetailsTable")
+    personDetailsTable.innerHTML = `<tr><th>Person</th><th>Items Consumed</th><th>Total Amount</th></tr>`
+
+    persons.forEach(person => {
+        const personItems = items
+            .filter(item => item.consumed.some(p => p.name === person && p.selected))
+            .map(item => item.name)
+
+        if(tax > 0 && taxPeople.includes(person)) personItems.push("Tax")
+        if(tip > 0 && tipPeople.includes(person)) personItems.push("Tip")
+
+        const row = personDetailsTable.insertRow()
+        row.insertCell(0).innerText = person
+        row.insertCell(1).innerText = personItems.length ? personItems.join(", ") : "-"
+        row.insertCell(2).innerText = "₹" + (totals[person] || 0).toFixed(2)
+    })
+    // Chart
+    const labels = Object.keys(totals)
+    const values = Object.values(totals)
+
+    if(billChartInstance) billChartInstance.destroy()
+
+    billChartInstance = new Chart(document.getElementById("billChart"), {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{ data: values }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        color: '#eee',
+                        boxWidth: 12,
+                        padding: 8
+                    }
+                },
+                datalabels: {
+                    color: '#fff',
+                    font: { weight: 'bold', size: 11 },
+                    textAlign: 'center',
+                    formatter: function(value, context){
+                        const name = labels[context.dataIndex]
+                        const pct = grandTotal ? ((value / grandTotal) * 100).toFixed(1) : "0.0"
+                        return `${name}\n₹${value.toFixed(0)}\n${pct}%`
+                    }
+                }
+            }
+        },
+        plugins: [ChartDataLabels]
+    })
+
+    document.getElementById("summaryScreen").style.display = "block"
+}
+
+function backToEntry(){
+    document.getElementById("summaryScreen").style.display = "none"
+}
+
+function resetAll(){
+    if(!confirm("This will clear everything and start fresh. Continue?")) return
+
+    persons = []
+    items = []
+
+    document.getElementById("restaurantName").value = ""
+    document.getElementById("billDate").value = ""
+    document.getElementById("billTime").value = ""
+    document.getElementById("tax").value = 0
+    document.getElementById("tip").value = 0
+    document.getElementById("personName").value = ""
+    document.getElementById("itemName").value = ""
+    document.getElementById("itemPrice").value = ""
+
+    document.getElementById("summaryScreen").style.display = "none"
+
+    updatePersonList()
+    updateItemList()
+    updateItemConsumption()
+    updateExtrasCheckboxes()
+    renderSummary()
+}
+
+// ---------- Helpers ----------
+function capitalizeWords(text){
+    return text.replace(/\b\w/g, letter => letter.toUpperCase())
+}
+
+function updateExtrasCheckboxes(){
+
+    const taxDiv = document.getElementById("taxPeopleContainer")
+    const tipDiv = document.getElementById("tipPeopleContainer")
+    taxDiv.innerHTML = ""
+    tipDiv.innerHTML = ""
+
+    const taxSelectAllLabel = document.createElement("div")
+    taxSelectAllLabel.className = "select-all-box"
+    const taxSelectAll = document.createElement("input")
+    taxSelectAll.type = "checkbox"
+    taxSelectAll.checked = true
+    taxSelectAll.onchange = function () {
+        document.querySelectorAll('.taxPerson').forEach(cb => cb.checked = this.checked)
+        renderSummary()
+    }
+    taxSelectAllLabel.appendChild(taxSelectAll)
+    taxSelectAllLabel.appendChild(document.createTextNode(" Select All"))
+    taxDiv.appendChild(taxSelectAllLabel)
+
+    const tipSelectAllLabel = document.createElement("div")
+    tipSelectAllLabel.className = "select-all-box"
+    const tipSelectAll = document.createElement("input")
+    tipSelectAll.type = "checkbox"
+    tipSelectAll.checked = true
+    tipSelectAll.onchange = function () {
+        document.querySelectorAll('.tipPerson').forEach(cb => cb.checked = this.checked)
+        renderSummary()
+    }
+    tipSelectAllLabel.appendChild(tipSelectAll)
+    tipSelectAllLabel.appendChild(document.createTextNode(" Select All"))
+    tipDiv.appendChild(tipSelectAllLabel)
+
+    persons.forEach(p => {
+
+        const taxLabel = document.createElement("div")
+        taxLabel.className = "checkbox-row"
+        const taxCb = document.createElement("input")
+        taxCb.type = "checkbox"
+        taxCb.checked = true
+        taxCb.className = "taxPerson"
+        taxCb.value = p
+        taxCb.onchange = function () {
+            const all = document.querySelectorAll('.taxPerson')
+            const checked = document.querySelectorAll('.taxPerson:checked')
+            taxSelectAll.checked = all.length === checked.length
+            renderSummary()
+        }
+        taxLabel.appendChild(taxCb)
+        taxLabel.appendChild(document.createTextNode(p))
+        taxDiv.appendChild(taxLabel)
+
+        const tipLabel = document.createElement("div")
+        tipLabel.className = "checkbox-row"
+        const tipCb = document.createElement("input")
+        tipCb.type = "checkbox"
+        tipCb.checked = true
+        tipCb.className = "tipPerson"
+        tipCb.value = p
+        tipCb.onchange = function () {
+            const all = document.querySelectorAll('.tipPerson')
+            const checked = document.querySelectorAll('.tipPerson:checked')
+            tipSelectAll.checked = all.length === checked.length
+            renderSummary()
+        }
+        tipLabel.appendChild(tipCb)
+        tipLabel.appendChild(document.createTextNode(p))
+        tipDiv.appendChild(tipLabel)
+    })
+}
+
+function getTotalPercentage(item){
+    return item.consumed.filter(p => p.selected).reduce((sum,p)=> sum + (p.percentage || 0), 0)
+}
+
+function downloadPDF(){
+    const { jsPDF } = window.jspdf
+    const doc = new jsPDF()
+
+    const restaurantName = document.getElementById("restaurantName").value || "Untitled Bill"
+    const billDate = document.getElementById("billDate").value
+    const billTime = document.getElementById("billTime").value
+
+    let y = 15
+    doc.setFontSize(16)
+    doc.text(restaurantName, 14, y)
+    y += 7
+    doc.setFontSize(10)
+    doc.text([billDate, billTime].filter(Boolean).join("  "), 14, y)
+    y += 10
+
+    doc.setFontSize(13)
+    doc.text("Total Payable", 14, y)
+    y += 7
+    doc.setFontSize(10)
+
+    const totals = computeTotals()
+    const grandTotal = Object.values(totals).reduce((a,b)=>a+b, 0)
+
+    for(const p in totals){
+        const pct = grandTotal ? ((totals[p] / grandTotal) * 100).toFixed(1) : "0.0"
+        doc.text(`${p}  -  ₹${totals[p].toFixed(2)}  (${pct}%)`, 14, y)
+        y += 6
+    }
+
+    y += 6
+    doc.setFontSize(13)
+    doc.text("Item Details", 14, y)
+    y += 7
+    doc.setFontSize(10)
+
+    items.forEach(item => {
+        const selected = item.consumed.filter(p => p.selected)
+        const split = selected.length
+            ? selected.map(p => item.equalSplit ? p.name : `${p.name} (${p.percentage.toFixed(0)}%)`).join(", ")
+            : "-"
+        doc.text(`${item.name}  -  ₹${item.price.toFixed(2)}  -  ${split}`, 14, y)
+        y += 6
+    })
+
+    const tax = parseFloat(document.getElementById('tax').value) || 0
+    const tip = parseFloat(document.getElementById('tip').value) || 0
+
+    if(tax > 0){
+        doc.text(`Tax  -  ₹${tax.toFixed(2)}`, 14, y)
+        y += 6
+    }
+    if(tip > 0){
+        doc.text(`Tip  -  ₹${tip.toFixed(2)}`, 14, y)
+        y += 6
+    }
+
+    doc.save(`${restaurantName.replace(/\s+/g,"_")}_bill.pdf`)
+}
+
+function downloadExcel(){
+    const restaurantName = document.getElementById("restaurantName").value || "Untitled Bill"
+    const totals = computeTotals()
+    const grandTotal = Object.values(totals).reduce((a,b)=>a+b, 0)
+    const tax = parseFloat(document.getElementById('tax').value) || 0
+    const tip = parseFloat(document.getElementById('tip').value) || 0
+
+    const totalsData = Object.keys(totals).map(p => ({
+        Person: p,
+        Total: totals[p].toFixed(2),
+        Percentage: (grandTotal ? ((totals[p]/grandTotal)*100).toFixed(1) : "0.0") + "%"
+    }))
+
+    const itemsData = items.map(item => {
+        const selected = item.consumed.filter(p => p.selected)
+        return {
+            Item: item.name,
+            Price: item.price.toFixed(2),
+            SplitBetween: selected.length
+                ? selected.map(p => item.equalSplit ? p.name : `${p.name} (${p.percentage.toFixed(0)}%)`).join(", ")
+                : "-"
+        }
+    })
+
+    if(tax > 0){
+        const taxPeople = Array.from(document.querySelectorAll('.taxPerson:checked')).map(cb => cb.value)
+        itemsData.push({ Item: "Tax", Price: tax.toFixed(2), SplitBetween: taxPeople.join(", ") || "-" })
+    }
+    if(tip > 0){
+        const tipPeople = Array.from(document.querySelectorAll('.tipPerson:checked')).map(cb => cb.value)
+        itemsData.push({ Item: "Tip", Price: tip.toFixed(2), SplitBetween: tipPeople.join(", ") || "-" })
+    }
+
+    const wb = XLSX.utils.book_new()
+    const ws1 = XLSX.utils.json_to_sheet(totalsData)
+    const ws2 = XLSX.utils.json_to_sheet(itemsData)
+
+    XLSX.utils.book_append_sheet(wb, ws1, "Total Payable")
+    XLSX.utils.book_append_sheet(wb, ws2, "Item Details")
+
+    XLSX.writeFile(wb, `${restaurantName.replace(/\s+/g,"_")}_bill.xlsx`)
+}
+
+</script>
+
+</body>
+</html>
